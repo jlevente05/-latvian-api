@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, Header
 from fastapi.responses import Response
+from pydantic import BaseModel
 from app.database import supabase
 from anthropic import Anthropic
 import os
@@ -7,7 +8,7 @@ import json
 import httpx
 
 router = APIRouter()
-client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+claude = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 def generate_and_cache_vocabulary(level: str, category: str):
     prompt = f"""Generate exactly 30 Latvian-Hungarian word pairs for level {level}, category: {category}.
@@ -23,7 +24,7 @@ Return only a JSON array, nothing else, in this exact format:
 ]
 Make sure all words are accurate, natural, and appropriate for {level} level learners."""
 
-    response = client.messages.create(
+    response = claude.messages.create(
         model="claude-sonnet-4-20250514",
         max_tokens=4000,
         messages=[{"role": "user", "content": prompt}]
@@ -89,6 +90,51 @@ def get_categories():
             if key not in seen:
                 seen.add(key)
                 result.append({"level": row["level"], "category": row["category"]})
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+class ExampleRequest(BaseModel):
+    vocab_id: str
+    latvian: str
+    hungarian: str
+
+@router.post("/example")
+async def get_example_sentence(data: ExampleRequest):
+    try:
+        existing = supabase.table("vocabulary")\
+            .select("example_lv, example_hu")\
+            .eq("id", data.vocab_id)\
+            .execute()
+
+        if existing.data and existing.data[0]["example_lv"]:
+            return {
+                "example_lv": existing.data[0]["example_lv"],
+                "example_hu": existing.data[0]["example_hu"]
+            }
+
+        prompt = f"""Create one simple example sentence in Latvian using the word "{data.latvian}" (meaning: "{data.hungarian}").
+Return only a JSON object, nothing else:
+{{
+  "example_lv": "the sentence in Latvian",
+  "example_hu": "the sentence in Hungarian"
+}}
+Keep it short and natural, appropriate for A1-A2 level."""
+
+        response = claude.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=300,
+            messages=[{"role": "user", "content": prompt}]
+        )
+
+        result = json.loads(response.content[0].text)
+
+        supabase.table("vocabulary").update({
+            "example_lv": result["example_lv"],
+            "example_hu": result["example_hu"]
+        }).eq("id", data.vocab_id).execute()
+
         return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
