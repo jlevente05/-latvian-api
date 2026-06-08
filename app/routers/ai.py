@@ -3,6 +3,8 @@ from pydantic import BaseModel
 from app.database import supabase
 from anthropic import Anthropic
 import os
+import json
+import traceback
 
 router = APIRouter()
 client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
@@ -50,10 +52,10 @@ Return only the JSON, nothing else."""
             messages=[{"role": "user", "content": prompt}]
         )
 
-        import json
         exercise = json.loads(response.content[0].text)
         return exercise
     except Exception as e:
+        print("EXERCISE ERROR:", traceback.format_exc())
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.post("/conversation")
@@ -81,4 +83,5 @@ Topic: {data.topic}
 
         return {"response": response.content[0].text}
     except Exception as e:
+        print("CONVERSATION ERROR:", traceback.format_exc())
         raise HTTPException(status_code=400, detail=str(e))
