@@ -1,8 +1,10 @@
 from fastapi import APIRouter, HTTPException, Header
+from fastapi.responses import Response
 from app.database import supabase
 from anthropic import Anthropic
 import os
 import json
+import httpx
 
 router = APIRouter()
 client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
@@ -30,6 +32,14 @@ Make sure all words are accurate, natural, and appropriate for {level} level lea
     words = json.loads(response.content[0].text)
     supabase.table("vocabulary").insert(words).execute()
     return words
+
+
+@router.get("/tts")
+async def text_to_speech(text: str, lang: str):
+    url = f"https://translate.google.com/translate_tts?ie=UTF-8&q={text}&tl={lang}&client=gtx"
+    async with httpx.AsyncClient() as client:
+        response = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
+    return Response(content=response.content, media_type="audio/mpeg")
 
 
 @router.get("/")
