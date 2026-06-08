@@ -44,7 +44,7 @@ Generate one exercise in this exact JSON format:
 }}
 {weak_spots_text}
 Category: {data.category or "general vocabulary"}
-Return only the JSON, nothing else."""
+Return only the JSON, nothing else. No markdown, no code blocks, just raw JSON."""
 
         response = client.messages.create(
             model="claude-sonnet-4-5",
@@ -52,7 +52,12 @@ Return only the JSON, nothing else."""
             messages=[{"role": "user", "content": prompt}]
         )
 
-        exercise = json.loads(response.content[0].text)
+        raw = response.content[0].text.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        exercise = json.loads(raw.strip())
         return exercise
     except Exception as e:
         print("EXERCISE ERROR:", traceback.format_exc())
