@@ -47,7 +47,7 @@ Category: {data.category or "general vocabulary"}
 Return only the JSON, nothing else."""
 
         response = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-5",
             max_tokens=1000,
             messages=[{"role": "user", "content": prompt}]
         )
@@ -75,7 +75,7 @@ Topic: {data.topic}
         messages = [{"role": m.role, "content": m.content} for m in data.messages]
 
         response = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-5",
             max_tokens=1000,
             system=system_prompt,
             messages=messages

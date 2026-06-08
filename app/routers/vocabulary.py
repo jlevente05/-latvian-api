@@ -25,7 +25,7 @@ Return only a JSON array, nothing else, in this exact format:
 Make sure all words are accurate, natural, and appropriate for {level} level learners."""
 
     response = claude.messages.create(
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-4-5",
         max_tokens=4000,
         messages=[{"role": "user", "content": prompt}]
     )
@@ -123,7 +123,7 @@ Return only a JSON object, nothing else:
 Keep it short and natural, appropriate for A1-A2 level."""
 
         response = claude.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-5",
             max_tokens=300,
             messages=[{"role": "user", "content": prompt}]
         )
