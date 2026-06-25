@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import auth, vocabulary, progress, ai
+from app.routers import auth, vocabulary, progress, ai, users, lessons
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -19,6 +19,8 @@ app.include_router(auth.router, prefix="/auth", tags=["auth"])
 app.include_router(vocabulary.router, prefix="/vocabulary", tags=["vocabulary"])
 app.include_router(progress.router, prefix="/progress", tags=["progress"])
 app.include_router(ai.router, prefix="/ai", tags=["ai"])
+app.include_router(users.router, prefix="/users", tags=["users"])
+app.include_router(lessons.router, prefix="/lessons", tags=["lessons"])
 
 @app.get("/")
 def root():
