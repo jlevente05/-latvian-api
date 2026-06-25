@@ -5,9 +5,14 @@ from datetime import datetime, timedelta
 
 router = APIRouter()
 
+def get_token(authorization: str):
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Authorization header missing")
+    return authorization.replace("Bearer ", "").strip()
+
 class ReviewResult(BaseModel):
     vocab_id: str
-    quality: int  # 0-5, like Anki. 0=blackout, 5=perfect
+    quality: int
 
 def sm2(ease_factor: float, interval: int, reps: int, quality: int):
     if quality < 3:
@@ -24,13 +29,12 @@ def sm2(ease_factor: float, interval: int, reps: int, quality: int):
 
     ease_factor = ease_factor + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02))
     ease_factor = max(1.3, ease_factor)
-
     return ease_factor, interval, reps
 
 @router.post("/review")
 def submit_review(data: ReviewResult, authorization: str = Header(None)):
     try:
-        token = authorization.replace("Bearer ", "")
+        token = get_token(authorization)
         user = supabase.auth.get_user(token)
         user_id = user.user.id
 
@@ -73,7 +77,7 @@ def submit_review(data: ReviewResult, authorization: str = Header(None)):
 @router.get("/stats")
 def get_stats(authorization: str = Header(None)):
     try:
-        token = authorization.replace("Bearer ", "")
+        token = get_token(authorization)
         user = supabase.auth.get_user(token)
         user_id = user.user.id
 

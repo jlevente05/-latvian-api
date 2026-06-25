@@ -4,18 +4,19 @@ from app.database import supabase
 from anthropic import Anthropic
 import os
 import json
+import traceback
 
 router = APIRouter()
 claude = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 LEVELS = ["A1", "A2", "B1", "B2"]
 
-def get_user_id(authorization: str):
-    token = authorization.replace("Bearer ", "")
-    user = supabase.auth.get_user(token)
-    return user.user.id
+def get_token(authorization: str):
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Authorization header missing")
+    return authorization.replace("Bearer ", "").strip()
 
-def ensure_vocabulary(level: str, topic: str, native_lang: str):
+def ensure_vocabulary(level: str, topic: str):
     existing = supabase.table("vocabulary")\
         .select("id")\
         .eq("level", level)\
@@ -25,11 +26,8 @@ def ensure_vocabulary(level: str, topic: str, native_lang: str):
     if len(existing.data) >= 20:
         return
 
-    target_lang = "Latvian" if native_lang == "hu" else "Hungarian"
-    source_lang = "Hungarian" if native_lang == "hu" else "Latvian"
-
-    prompt = f"""Generate exactly 30 {target_lang}-{source_lang} word pairs for level {level}, category: {topic}.
-Return only a JSON array, nothing else:
+    prompt = f"""Generate exactly 30 Latvian-Hungarian word pairs for level {level}, category: {topic}.
+Return only raw JSON array, no markdown, no code blocks:
 [
   {{
     "latvian": "word in latvian",
@@ -59,13 +57,15 @@ Make sure all words are accurate and appropriate for {level} level."""
 @router.get("/tree")
 def get_lesson_tree(authorization: str = Header(None)):
     try:
-        user_id = get_user_id(authorization)
+        token = get_token(authorization)
+        user = supabase.auth.get_user(token)
+        user_id = user.user.id
 
         profile = supabase.table("users")\
             .select("current_level, native_lang")\
             .eq("id", user_id)\
             .execute()
-        current_level = profile.data[0].get("current_level", "A1")
+        current_level = profile.data[0].get("current_level") or "A1"
 
         all_lessons = supabase.table("lessons")\
             .select("*")\
@@ -103,7 +103,6 @@ def get_lesson_tree(authorization: str = Header(None)):
 
             level_index = LEVELS.index(level) if level in LEVELS else 99
             current_index = LEVELS.index(current_level) if current_level in LEVELS else 0
-
             is_locked = level_index > current_index
             is_completed = lesson["id"] in completed_ids
 
@@ -132,13 +131,16 @@ def get_lesson_tree(authorization: str = Header(None)):
 
         return result
     except Exception as e:
+        print("TREE ERROR:", traceback.format_exc())
         raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/{lesson_id}")
 def get_lesson(lesson_id: str, authorization: str = Header(None)):
     try:
-        user_id = get_user_id(authorization)
+        token = get_token(authorization)
+        user = supabase.auth.get_user(token)
+        user_id = user.user.id
 
         lesson = supabase.table("lessons")\
             .select("*")\
@@ -149,14 +151,7 @@ def get_lesson(lesson_id: str, authorization: str = Header(None)):
             raise HTTPException(status_code=404, detail="Lesson not found")
 
         l = lesson.data[0]
-
-        profile = supabase.table("users")\
-            .select("native_lang")\
-            .eq("id", user_id)\
-            .execute()
-        native_lang = profile.data[0].get("native_lang", "hu")
-
-        ensure_vocabulary(l["level"], l["topic"], native_lang)
+        ensure_vocabulary(l["level"], l["topic"])
 
         vocab = supabase.table("vocabulary")\
             .select("*")\
@@ -165,12 +160,19 @@ def get_lesson(lesson_id: str, authorization: str = Header(None)):
             .limit(20)\
             .execute()
 
+        profile = supabase.table("users")\
+            .select("native_lang")\
+            .eq("id", user_id)\
+            .execute()
+        native_lang = profile.data[0].get("native_lang") or "hu"
+
         return {
             "lesson": l,
             "vocabulary": vocab.data,
             "native_lang": native_lang,
         }
     except Exception as e:
+        print("LESSON ERROR:", traceback.format_exc())
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -182,7 +184,9 @@ class LessonComplete(BaseModel):
 @router.post("/{lesson_id}/complete")
 def complete_lesson(lesson_id: str, data: LessonComplete, authorization: str = Header(None)):
     try:
-        user_id = get_user_id(authorization)
+        token = get_token(authorization)
+        user = supabase.auth.get_user(token)
+        user_id = user.user.id
 
         existing = supabase.table("lesson_completions")\
             .select("id")\
@@ -203,10 +207,12 @@ def complete_lesson(lesson_id: str, data: LessonComplete, authorization: str = H
                 "hearts_remaining": data.hearts_remaining,
             }).execute()
 
-        profile = supabase.table("users").select("xp, hearts").eq("id", user_id).execute()
-        current_xp = profile.data[0].get("xp", 0)
+        profile = supabase.table("users").select("xp").eq("id", user_id).execute()
+        current_xp = profile.data[0].get("xp") or 0
+        new_xp = current_xp + data.xp_earned
+
         supabase.table("users").update({
-            "xp": current_xp + data.xp_earned,
+            "xp": new_xp,
             "hearts": data.hearts_remaining,
         }).eq("id", user_id).execute()
 
@@ -223,43 +229,64 @@ def complete_lesson(lesson_id: str, data: LessonComplete, authorization: str = H
         unit_completions = supabase.table("lesson_completions")\
             .select("lesson_id")\
             .eq("user_id", user_id)\
-            .in_("lesson_id", list(unit_lesson_ids))\
             .execute()
-        completed_in_unit = {c["lesson_id"] for c in unit_completions.data}
+        completed_in_unit = {c["lesson_id"] for c in unit_completions.data if c["lesson_id"] in unit_lesson_ids}
 
         unit_complete = unit_lesson_ids == completed_in_unit
+
+        all_lessons = supabase.table("lessons")\
+            .select("id")\
+            .eq("level", l["level"])\
+            .execute()
+        all_level_ids = {al["id"] for al in all_lessons.data}
+
+        all_completions = supabase.table("lesson_completions")\
+            .select("lesson_id")\
+            .eq("user_id", user_id)\
+            .execute()
+        completed_level = {c["lesson_id"] for c in all_completions.data if c["lesson_id"] in all_level_ids}
+        level_complete = all_level_ids == completed_level
 
         return {
             "success": True,
             "unit_complete": unit_complete,
-            "xp_total": current_xp + data.xp_earned,
+            "level_complete": level_complete,
+            "xp_total": new_xp,
         }
     except Exception as e:
+        print("COMPLETE ERROR:", traceback.format_exc())
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.post("/{level}/level-test")
-def submit_level_test(level: str, data: dict, authorization: str = Header(None)):
+class LevelTestSubmit(BaseModel):
+    level: str
+    score: int
+
+@router.post("/level-test/submit")
+def submit_level_test(data: LevelTestSubmit, authorization: str = Header(None)):
     try:
-        user_id = get_user_id(authorization)
-        score = data.get("score", 0)
-        passed = score >= 80
+        token = get_token(authorization)
+        user = supabase.auth.get_user(token)
+        user_id = user.user.id
+
+        passed = data.score >= 80
 
         supabase.table("level_tests").insert({
             "user_id": user_id,
-            "level": level,
-            "score": score,
+            "level": data.level,
+            "score": data.score,
             "passed": passed,
         }).execute()
 
         if passed:
-            level_index = LEVELS.index(level)
-            if level_index < len(LEVELS) - 1:
+            level_index = LEVELS.index(data.level) if data.level in LEVELS else -1
+            if level_index >= 0 and level_index < len(LEVELS) - 1:
                 next_level = LEVELS[level_index + 1]
                 supabase.table("users").update({
                     "current_level": next_level
                 }).eq("id", user_id).execute()
 
-        return {"passed": passed, "score": score}
+        return {"passed": passed, "score": data.score}
     except Exception as e:
+        print("LEVEL TEST ERROR:", traceback.format_exc())
         raise HTTPException(status_code=400, detail=str(e))

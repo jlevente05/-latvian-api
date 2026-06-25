@@ -5,10 +5,19 @@ from datetime import date, timedelta
 
 router = APIRouter()
 
+def get_token(authorization: str):
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Authorization header missing")
+    return authorization.replace("Bearer ", "").strip()
+
+class ActivityUpdate(BaseModel):
+    xp_earned: int
+    hearts_remaining: int
+
 @router.get("/profile")
 def get_profile(authorization: str = Header(None)):
     try:
-        token = authorization.replace("Bearer ", "")
+        token = get_token(authorization)
         user = supabase.auth.get_user(token)
         user_id = user.user.id
 
@@ -19,37 +28,32 @@ def get_profile(authorization: str = Header(None)):
         p = profile.data[0]
 
         words_learned = supabase.table("progress")\
-            .select("id", count="exact")\
+            .select("id")\
             .eq("user_id", user_id)\
             .execute()
 
         lessons_completed = supabase.table("lesson_completions")\
-            .select("id", count="exact")\
+            .select("id")\
             .eq("user_id", user_id)\
             .execute()
 
         return {
             "email": user.user.email,
-            "native_lang": p.get("native_lang", "hu"),
-            "current_level": p.get("current_level", "A1"),
-            "streak": p.get("streak", 0),
-            "xp": p.get("xp", 0),
-            "hearts": p.get("hearts", 5),
-            "words_learned": words_learned.count or 0,
-            "lessons_completed": lessons_completed.count or 0,
+            "native_lang": p.get("native_lang") or "hu",
+            "current_level": p.get("current_level") or "A1",
+            "streak": p.get("streak") or 0,
+            "xp": p.get("xp") or 0,
+            "hearts": p.get("hearts") or 5,
+            "words_learned": len(words_learned.data),
+            "lessons_completed": len(lessons_completed.data),
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-
-class ActivityUpdate(BaseModel):
-    xp_earned: int
-    hearts_remaining: int
-
 @router.post("/activity")
 def update_activity(data: ActivityUpdate, authorization: str = Header(None)):
     try:
-        token = authorization.replace("Bearer ", "")
+        token = get_token(authorization)
         user = supabase.auth.get_user(token)
         user_id = user.user.id
 
@@ -58,7 +62,7 @@ def update_activity(data: ActivityUpdate, authorization: str = Header(None)):
 
         today = date.today()
         last_active = p.get("last_active")
-        current_streak = p.get("streak", 0)
+        current_streak = p.get("streak") or 0
 
         if last_active:
             last_date = date.fromisoformat(str(last_active))
@@ -71,7 +75,7 @@ def update_activity(data: ActivityUpdate, authorization: str = Header(None)):
         else:
             new_streak = 1
 
-        new_xp = p.get("xp", 0) + data.xp_earned
+        new_xp = (p.get("xp") or 0) + data.xp_earned
 
         supabase.table("users").update({
             "streak": new_streak,
@@ -88,16 +92,15 @@ def update_activity(data: ActivityUpdate, authorization: str = Header(None)):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-
 @router.post("/lose-heart")
 def lose_heart(authorization: str = Header(None)):
     try:
-        token = authorization.replace("Bearer ", "")
+        token = get_token(authorization)
         user = supabase.auth.get_user(token)
         user_id = user.user.id
 
         profile = supabase.table("users").select("hearts").eq("id", user_id).execute()
-        current_hearts = profile.data[0].get("hearts", 5)
+        current_hearts = profile.data[0].get("hearts") or 5
 
         if current_hearts <= 0:
             raise HTTPException(status_code=400, detail="No hearts remaining")
@@ -109,11 +112,10 @@ def lose_heart(authorization: str = Header(None)):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-
 @router.post("/refill-hearts")
 def refill_hearts(authorization: str = Header(None)):
     try:
-        token = authorization.replace("Bearer ", "")
+        token = get_token(authorization)
         user = supabase.auth.get_user(token)
         user_id = user.user.id
 
