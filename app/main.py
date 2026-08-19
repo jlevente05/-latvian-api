@@ -30,3 +30,7 @@ def root():
         "version": "2.0",
         "description": "Latvian-Hungarian language learning platform"
     }
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
