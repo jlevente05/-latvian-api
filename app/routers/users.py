@@ -32,9 +32,10 @@ def get_profile(authorization: str = Header(None)):
             .eq("user_id", user_id)\
             .execute()
 
-        lessons_completed = supabase.table("lesson_completions")\
+        units_completed = supabase.table("unit_progress")\
             .select("id")\
             .eq("user_id", user_id)\
+            .eq("test_passed", True)\
             .execute()
 
         return {
@@ -45,7 +46,7 @@ def get_profile(authorization: str = Header(None)):
             "xp": p.get("xp") or 0,
             "hearts": p.get("hearts") or 5,
             "words_learned": len(words_learned.data),
-            "lessons_completed": len(lessons_completed.data),
+            "units_completed": len(units_completed.data),
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
