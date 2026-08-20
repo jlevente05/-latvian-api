@@ -40,6 +40,7 @@ def get_profile(authorization: str = Header(None)):
 
         return {
             "email": user.user.email,
+            "display_name": p.get("display_name"),
             "native_lang": p.get("native_lang") or "hu",
             "current_level": p.get("current_level") or "A1",
             "streak": p.get("streak") or 0,
@@ -47,7 +48,34 @@ def get_profile(authorization: str = Header(None)):
             "hearts": p.get("hearts") or 5,
             "words_learned": len(words_learned.data),
             "units_completed": len(units_completed.data),
+            "daily_goal": p.get("daily_goal"),
+            "learning_reason": p.get("learning_reason"),
         }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.get("/leaderboard")
+def get_leaderboard(authorization: str = Header(None)):
+    try:
+        token = get_token(authorization)
+        user = supabase.auth.get_user(token)
+
+        users = supabase.table("users")\
+            .select("id, display_name, email, xp, current_level, streak")\
+            .order("xp", desc=True)\
+            .execute()
+
+        result = []
+        for i, u in enumerate(users.data):
+            result.append({
+                "rank": i + 1,
+                "display_name": u.get("display_name") or u.get("email", "").split("@")[0],
+                "xp": u.get("xp") or 0,
+                "current_level": u.get("current_level") or "A1",
+                "streak": u.get("streak") or 0,
+            })
+
+        return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 

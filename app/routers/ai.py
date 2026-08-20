@@ -5,6 +5,7 @@ from anthropic import Anthropic
 import os
 import json
 import traceback
+from typing import Optional, List
 
 router = APIRouter()
 client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
@@ -25,7 +26,7 @@ def parse_json(text: str):
 class ExerciseRequest(BaseModel):
     level: str
     category: str = None
-    weak_spots: list[str] = []
+    weak_spots: List[str] = []
     native_lang: str = "hu"
 
 class ConversationMessage(BaseModel):
@@ -33,17 +34,17 @@ class ConversationMessage(BaseModel):
     content: str
 
 class ConversationRequest(BaseModel):
-    messages: list[ConversationMessage]
+    messages: List[ConversationMessage]
     topic: str = "general"
     native_lang: str = "hu"
-    unit_id: str = None
+    unit_id: Optional[str] = None
 
 class TeacherRequest(BaseModel):
     unit_id: str
     section: str
     message: str
     native_lang: str = "hu"
-    grammar_mistakes: list[str] = []
+    grammar_mistakes: List[str] = []
 
 class GradeRequest(BaseModel):
     question: str
@@ -54,6 +55,12 @@ class GradeRequest(BaseModel):
 
 class LevelTestRequest(BaseModel):
     level: str
+    native_lang: str = "hu"
+    unit_id: Optional[str] = None
+
+class SpeakingGradeRequest(BaseModel):
+    expected_text: str
+    spoken_text: str
     native_lang: str = "hu"
 
 @router.post("/exercise")
@@ -126,12 +133,10 @@ Topic: {u['description']}
 Grammar focus: {u['grammar_focus']}
 Current section: {data.section}
 {mistakes_text}
-
 Rules:
-- Always respond in Hungarian (the student's native language) unless demonstrating Latvian
+- Always respond in Hungarian unless demonstrating Latvian
 - Be encouraging, patient, and clear
-- Always anchor explanations to the unit's topic and vocabulary
-- Use examples from the unit's dialogue when possible
+- Anchor explanations to the unit topic and vocabulary
 - When showing Latvian, always provide Hungarian translation
 - Keep responses concise but thorough"""
         else:
@@ -141,11 +146,9 @@ Topic: {u['description']}
 Grammar focus: {u['grammar_focus']}
 Current section: {data.section}
 {mistakes_text}
-
 Rules:
-- Always respond in Latvian (the student's native language) unless demonstrating Hungarian
+- Always respond in Latvian unless demonstrating Hungarian
 - Be encouraging, patient, and clear
-- Always anchor explanations to the unit's topic and vocabulary
 - When showing Hungarian, always provide Latvian translation
 - Keep responses concise but thorough"""
 
@@ -169,7 +172,6 @@ def grade_exercise(data: GradeRequest, authorization: str = Header(None)):
         user = supabase.auth.get_user(token)
 
         prompt = f"""You are grading a language exercise for the Tilts app.
-
 Question: {data.question}
 Student's answer: {data.user_answer}
 Correct answer: {data.correct_answer}
@@ -195,6 +197,46 @@ Return only raw JSON, no markdown:
         return result
     except Exception as e:
         print("GRADE ERROR:", traceback.format_exc())
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/grade-speaking")
+def grade_speaking(data: SpeakingGradeRequest, authorization: str = Header(None)):
+    try:
+        token = get_token(authorization)
+        user = supabase.auth.get_user(token)
+
+        expected_words = data.expected_text.lower().split()
+        spoken_words = data.spoken_text.lower().split()
+
+        matched = sum(1 for w in spoken_words if w in expected_words)
+        score = round((matched / len(expected_words)) * 100) if expected_words else 0
+
+        prompt = f"""You are evaluating a speaking exercise for the Tilts language learning app.
+Expected text: "{data.expected_text}"
+What the student said: "{data.spoken_text}"
+Match score: {score}%
+
+Give brief encouraging feedback in {'Hungarian' if data.native_lang == 'hu' else 'Latvian'}.
+Return only raw JSON:
+{{
+  "score": {score},
+  "correct": {"true" if score >= 70 else "false"},
+  "feedback": "brief feedback",
+  "expected": "{data.expected_text}",
+  "spoken": "{data.spoken_text}"
+}}"""
+
+        response = client.messages.create(
+            model="claude-sonnet-4-5",
+            max_tokens=300,
+            messages=[{"role": "user", "content": prompt}]
+        )
+
+        result = parse_json(response.content[0].text)
+        return result
+    except Exception as e:
+        print("SPEAKING GRADE ERROR:", traceback.format_exc())
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -254,6 +296,21 @@ def generate_level_test(data: LevelTestRequest, authorization: str = Header(None
         token = get_token(authorization)
         user = supabase.auth.get_user(token)
 
+        unit_context = ""
+        if data.unit_id:
+            unit = supabase.table("units").select("*").eq("id", data.unit_id).execute()
+            if unit.data:
+                u = unit.data[0]
+                vocab = supabase.table("vocabulary").select("latvian, hungarian").eq("unit_id", data.unit_id).execute()
+                vocab_list = ", ".join([f"{v['latvian']} ({v['hungarian']})" for v in vocab.data[:15]])
+                grammar = supabase.table("grammar_points").select("title").eq("unit_id", data.unit_id).execute()
+                grammar_list = ", ".join([g['title'] for g in grammar.data])
+                unit_context = f"""This test is specifically for Unit {u['unit_number']}: "{u['title_en']}".
+Only test vocabulary and grammar from this unit.
+Vocabulary covered: {vocab_list}
+Grammar covered: {grammar_list}
+Do NOT include vocabulary or grammar from other units."""
+
         if data.native_lang == "hu":
             lang_desc = "Hungarian native speaker learning Latvian"
             instruction = "Instructions and explanations in Hungarian"
@@ -261,9 +318,9 @@ def generate_level_test(data: LevelTestRequest, authorization: str = Header(None
             lang_desc = "Latvian native speaker learning Hungarian"
             instruction = "Instructions and explanations in Latvian"
 
-        prompt = f"""Generate 10 multiple choice questions for a {data.level} level test on the Tilts app.
+        prompt = f"""Generate 10 multiple choice questions for a unit test on the Tilts app.
 Testing a {lang_desc}. {instruction}.
-Cover vocabulary and grammar from {data.level} level.
+{unit_context}
 Return only raw JSON array, no markdown:
 [
   {{
