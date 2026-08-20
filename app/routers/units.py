@@ -165,7 +165,7 @@ def complete_section(unit_id: str, data: SectionComplete, authorization: str = H
         user = supabase.auth.get_user(token)
         user_id = user.user.id
 
-        valid_sections = ["dialogue", "vocabulary", "grammar", "reading", "conversation"]
+        valid_sections = ["dialogue", "vocabulary", "grammar", "reading", "conversation", "speaking"]
         if data.section not in valid_sections:
             raise HTTPException(status_code=400, detail="Invalid section")
 
